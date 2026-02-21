@@ -1,0 +1,15 @@
+{
+  "name": "agentspace",
+  "version": "1.0.0",
+  "description": "AgentSpace project",
+  "main": "skybox.js",
+  "scripts": {
+    "start": "node skybox.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2"
+  }
+}

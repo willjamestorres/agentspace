@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentSpace — Viewer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #020408;
+      --surface:   #080e18;
+      --border:    rgba(80, 160, 255, 0.15);
+      --glow:      rgba(60, 140, 255, 0.6);
+      --accent:    #3c8cff;
+      --accent2:   #00ffc8;
+      --text:      #e8f0ff;
+      --muted:     rgba(180, 200, 255, 0.45);
+      --danger:    #ff4466;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Canvas ── */
+    #canvas-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+
+    /* ── Vignette overlay ── */
+    #canvas-wrap::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(2,4,8,0.85) 100%);
+      pointer-events: none;
+    }
+
+    /* ── UI Layer ── */
+    #ui {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      pointer-events: none;
+    }
+
+    /* ── Header ── */
+    header {
+      pointer-events: all;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 28px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(2,4,8,0.95) 0%, rgba(2,4,8,0) 100%);
+    }
+
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.3rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .logo span {
+      color: var(--accent);
+      text-shadow: 0 0 20px var(--glow);
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 5px 14px;
+      background: rgba(8,14,24,0.8);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 8px var(--accent2);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.loading { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .status-dot.error   { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: none; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Agent Panel ── */
+    #agent-panel {
+      pointer-events: all;
+      position: absolute;
+      top: 76px;
+      left: 28px;
+      width: 280px;
+      background: rgba(8,14,24,0.85);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      backdrop-filter: blur(16px);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 12px 16px;
+      font-family: 'Syne', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-header::before {
+      content: '';
+      width: 3px;
+      height: 14px;
+      background: var(--accent);
+      border-radius: 2px;
+      box-shadow: 0 0 8px var(--glow);
+    }
+
+    #agent-list {
+      list-style: none;
+      padding: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    #agent-list::-webkit-scrollbar { width: 3px; }
+    #agent-list::-webkit-scrollbar-track { background: transparent; }
+    #agent-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .agent-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+      font-size: 0.78rem;
+    }
+
+    .agent-item:hover { background: rgba(60,140,255,0.08); }
+    .agent-item.active { background: rgba(60,140,255,0.14); }
+
+    .agent-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+
+    .agent-info { flex: 1; min-width: 0; }
+
+    .agent-name {
+      font-family: 'Syne', sans-serif;
+      font-weight: 600;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .agent-env {
+      color: var(--muted);
+      font-size: 0.68rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+
+    /* ── Prompt Panel ── */
+    #prompt-panel {
+      pointer-events: all;
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(640px, calc(100vw - 56px));
+      background: rgba(8,14,24,0.9);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      backdrop-filter: blur(20px);
+      padding: 16px;
+    }
+
+    .prompt-label {
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .prompt-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .prompt-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    textarea#prompt-input {
+      flex: 1;
+      background: rgba(2,4,8,0.8);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 0.82rem;
+      padding: 10px 14px;
+      resize: none;
+      height: 60px;
+      outline: none;
+      transition: border-color 0.2s;
+      line-height: 1.5;
+    }
+
+    textarea#prompt-input::placeholder { color: var(--muted); }
+    textarea#prompt-input:focus { border-color: var(--accent); }
+
+    #generate-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 0 20px;
+      height: 60px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.78rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.2s, box-shadow 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+      box-shadow: 0 0 20px rgba(60,140,255,0.3);
+    }
+
+    #generate-btn:hover { opacity: 0.85; box-shadow: 0 0 30px rgba(60,140,255,0.5); }
+    #generate-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+    /* ── Info Panel (top right) ── */
+    #info-panel {
+      pointer-events: all;
+      position: absolute;
+      top: 76px;
+      right: 28px;
+      width: 240px;
+      background: rgba(8,14,24,0.85);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      backdrop-filter: blur(16px);
+      padding: 14px 16px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 0.72rem;
+      border-bottom: 1px solid rgba(80,160,255,0.07);
+    }
+
+    .info-row:last-child { border-bottom: none; }
+    .info-key { color: var(--muted); letter-spacing: 0.05em; }
+    .info-val { color: var(--accent2); font-weight: 700; }
+
+    /* ── Loading overlay ── */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(2,4,8,0.9);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+
+    #loading-overlay.visible {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .loader-ring {
+      width: 60px;
+      height: 60px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loader-text {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 130px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(8,14,24,0.95);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 10px 20px;
+      font-size: 0.75rem;
+      color: var(--text);
+      z-index: 200;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #toast.error { border-color: var(--danger); color: var(--danger); }
+    #toast.success { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── Crosshair ── */
+    #crosshair {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      pointer-events: none;
+      z-index: 5;
+      opacity: 0.4;
+    }
+
+    #crosshair::before,
+    #crosshair::after {
+      content: '';
+      position: absolute;
+      background: var(--accent2);
+    }
+
+    #crosshair::before {
+      width: 1px;
+      height: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    #crosshair::after {
+      height: 1px;
+      width: 100%;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Three.js Canvas -->
+  <div id="canvas-wrap"></div>
+
+  <!-- Crosshair -->
+  <div id="crosshair"></div>
+
+  <!-- UI Overlay -->
+  <div id="ui">
+    <header>
+      <div class="logo">Agent<span>Space</span></div>
+      <div class="status-pill">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Ready</span>
+      </div>
+    </header>
+
+    <!-- Agent List -->
+    <div id="agent-panel">
+      <div class="panel-header">Agents Online</div>
+      <ul id="agent-list">
+        <li class="agent-item active" data-agent="agent-001">
+          <div class="agent-avatar" style="background:rgba(60,140,255,0.12);">🤖</div>
+          <div class="agent-info">
+            <div class="agent-name">Agent-001</div>
+            <div class="agent-env">Futuristic floating city</div>
+          </div>
+        </li>
+        <li class="agent-item" data-agent="agent-002">
+          <div class="agent-avatar" style="background:rgba(0,255,200,0.10);">🧠</div>
+          <div class="agent-info">
+            <div class="agent-name">Agent-002</div>
+            <div class="agent-env">Deep ocean bioluminescent</div>
+          </div>
+        </li>
+        <li class="agent-item" data-agent="agent-003">
+          <div class="agent-avatar" style="background:rgba(255,100,200,0.10);">⚡</div>
+          <div class="agent-info">
+            <div class="agent-name">Agent-003</div>
+            <div class="agent-env">Ancient forest, golden hour</div>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Environment Info -->
+    <div id="info-panel">
+      <div class="panel-header">Environment</div>
+      <div style="padding-top:4px;">
+        <div class="info-row">
+          <span class="info-key">Agent</span>
+          <span class="info-val" id="info-agent">Agent-001</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Skybox ID</span>
+          <span class="info-val" id="info-id">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Status</span>
+          <span class="info-val" id="info-status">Demo</span>
+        </div>
+        <div class="info-row">
+          <span class="info-key">Drag to look</span>
+          <span class="info-val" style="color:var(--muted);">Mouse</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prompt Input -->
+    <div id="prompt-panel">
+      <div class="prompt-label">Generate Environment</div>
+      <div class="prompt-row">
+        <textarea
+          id="prompt-input"
+          placeholder="Describe the agent's new environment… e.g. 'Crystal cave with glowing rivers of light'"
+        ></textarea>
+        <button id="generate-btn">Generate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay">
+    <div class="loader-ring"></div>
+    <div class="loader-text" id="loading-text">Generating environment…</div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Three.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <script>
+    // ─── Three.js Skybox Viewer ───────────────────────────────────────────────
+
+    const wrap = document.getElementById('canvas-wrap');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    wrap.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 0.001);
+
+    // Skybox sphere — we place the camera inside it
+    const geometry = new THREE.SphereGeometry(500, 60, 40);
+    geometry.scale(-1, 1, 1); // Invert so texture faces inward
+
+    const material = new THREE.MeshBasicMaterial({ color: 0x020408 });
+    const sphere = new THREE.Mesh(geometry, material);
+    scene.add(sphere);
+
+    // ─── Mouse-drag orbit ────────────────────────────────────────────────────
+
+    let isDragging = false;
+    let prevX = 0, prevY = 0;
+    let yaw = 0, pitch = 0;
+    const sensitivity = 0.003;
+
+    renderer.domElement.addEventListener('mousedown', e => {
+      isDragging = true;
+      prevX = e.clientX;
+      prevY = e.clientY;
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      yaw   -= (e.clientX - prevX) * sensitivity;
+      pitch -= (e.clientY - prevY) * sensitivity;
+      pitch  = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
+      prevX = e.clientX;
+      prevY = e.clientY;
+      updateCamera();
+    });
+
+    window.addEventListener('mouseup', () => isDragging = false);
+
+    // Touch support
+    renderer.domElement.addEventListener('touchstart', e => {
+      isDragging = true;
+      prevX = e.touches[0].clientX;
+      prevY = e.touches[0].clientY;
+    });
+
+    window.addEventListener('touchmove', e => {
+      if (!isDragging) return;
+      yaw   -= (e.touches[0].clientX - prevX) * sensitivity;
+      pitch -= (e.touches[0].clientY - prevY) * sensitivity;
+      pitch  = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
+      prevX = e.touches[0].clientX;
+      prevY = e.touches[0].clientY;
+      updateCamera();
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => isDragging = false);
+
+    function updateCamera() {
+      const euler = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+      camera.quaternion.setFromEuler(euler);
+    }
+
+    // ─── Resize ──────────────────────────────────────────────────────────────
+
+    window.addEventListener('resize', () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+    });
+
+    // ─── Render loop ─────────────────────────────────────────────────────────
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ─── Load Skybox Texture ─────────────────────────────────────────────────
+
+    function loadSkybox(imageUrl) {
+      setStatus('loading', 'Loading texture…');
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        imageUrl,
+        texture => {
+          sphere.material = new THREE.MeshBasicMaterial({ map: texture });
+          sphere.material.needsUpdate = true;
+          setStatus('ready', 'Online');
+          document.getElementById('info-status').textContent = 'Live';
+          showToast('Environment loaded', 'success');
+        },
+        undefined,
+        err => {
+          console.error('Texture load error:', err);
+          setStatus('error', 'Load failed');
+          showToast('Failed to load skybox texture', 'error');
+        }
+      );
+    }
+
+    // ─── UI Helpers ───────────────────────────────────────────────────────────
+
+    function setStatus(state, text) {
+      const dot  = document.getElementById('status-dot');
+      const span = document.getElementById('status-text');
+      dot.className  = 'status-dot' + (state !== 'ready' ? ' ' + state : '');
+      span.textContent = text;
+    }
+
+    function showLoading(text = 'Generating environment…') {
+      const overlay = document.getElementById('loading-overlay');
+      document.getElementById('loading-text').textContent = text;
+      overlay.classList.add('visible');
+    }
+
+    function hideLoading() {
+      document.getElementById('loading-overlay').classList.remove('visible');
+    }
+
+    function showToast(msg, type = '') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'show' + (type ? ' ' + type : '');
+      setTimeout(() => { t.className = ''; }, 3000);
+    }
+
+    // ─── Agent Selection ──────────────────────────────────────────────────────
+
+    const agents = {
+      'agent-001': { name: 'Agent-001', env: 'Futuristic floating city' },
+      'agent-002': { name: 'Agent-002', env: 'Deep ocean bioluminescent' },
+      'agent-003': { name: 'Agent-003', env: 'Ancient forest, golden hour' },
+    };
+
+    document.querySelectorAll('.agent-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.agent-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        const id = item.dataset.agent;
+        document.getElementById('info-agent').textContent = agents[id].name;
+        document.getElementById('prompt-input').placeholder =
+          `Describe ${agents[id].name}'s new environment…`;
+        showToast(`Switched to ${agents[id].name}`);
+      });
+    });
+
+    // ─── Generate Button ──────────────────────────────────────────────────────
+
+    document.getElementById('generate-btn').addEventListener('click', async () => {
+      const prompt = document.getElementById('prompt-input').value.trim();
+      if (!prompt) { showToast('Enter an environment description first', 'error'); return; }
+
+      const btn = document.getElementById('generate-btn');
+      const activeAgent = document.querySelector('.agent-item.active')?.dataset.agent || 'agent-001';
+
+      btn.disabled = true;
+      showLoading('Requesting skybox generation…');
+      setStatus('loading', 'Generating…');
+
+      try {
+        // ── Call your local skybox.js backend ──
+        // This expects a small Express server wrapping skybox.js (server.js)
+        // See the instructions in server.js (next file to build)
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: activeAgent, prompt })
+        });
+
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        const data = await res.json();
+
+        document.getElementById('info-id').textContent = data.skybox?.id || '—';
+
+        if (data.skybox?.fileUrl) {
+          document.getElementById('loading-text').textContent = 'Loading environment…';
+          loadSkybox(data.skybox.fileUrl);
+          // Update agent env label
+          document.querySelector(`[data-agent="${activeAgent}"] .agent-env`).textContent = prompt;
+          agents[activeAgent].env = prompt;
+        } else {
+          showToast('Skybox queued — check back shortly', 'success');
+          setStatus('ready', 'Online');
+        }
+
+      } catch (err) {
+        console.error(err);
+        showToast('Generation failed: ' + err.message, 'error');
+        setStatus('error', 'Error');
+      } finally {
+        hideLoading();
+        btn.disabled = false;
+      }
+    });
+
+    // ─── Demo: load a placeholder gradient skybox on startup ─────────────────
+    // Replace this with a real loadSkybox(url) call once your backend is running
+
+    (function drawPlaceholder() {
+      const size = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = size * 4;
+      canvas.height = size * 2;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createLinearGradient(0, 0, 0, size * 2);
+      grad.addColorStop(0,   '#0a0e2a');
+      grad.addColorStop(0.4, '#0d1a3a');
+      grad.addColorStop(0.7, '#071020');
+      grad.addColorStop(1,   '#020408');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size * 4, size * 2);
+
+      // Stars
+      ctx.fillStyle = 'white';
+      for (let i = 0; i < 800; i++) {
+        const x = Math.random() * size * 4;
+        const y = Math.random() * size * 1.2;
+        const r = Math.random() * 1.2;
+        ctx.globalAlpha = Math.random() * 0.8 + 0.2;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      const texture = new THREE.CanvasTexture(canvas);
+      sphere.material = new THREE.MeshBasicMaterial({ map: texture });
+    })();
+  </script>
+</body>
+</html>
