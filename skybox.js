@@ -144,7 +144,7 @@ async function getSkyboxStatus(skyboxId) {
  * @param {number} [timeoutMs] - Max wait time in ms (default: 3 minutes)
  * @returns {object}           - Completed skybox data with fileUrl
  */
-async function generateSkyboxAndWait(prompt, styleId = null, negPrompt = '', timeoutMs = 180000) {
+async function generateSkyboxAndWait(prompt, styleId = null, negPrompt = '', timeoutMs = 300000) {
   const result = await generateSkybox(prompt, styleId, negPrompt);
 
   if (result.status === 'complete') return result;

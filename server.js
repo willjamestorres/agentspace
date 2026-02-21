@@ -26,6 +26,7 @@ require('dotenv').config();
 const express  = require('express');
 const cors     = require('cors');
 const path     = require('path');
+const { updateEnvironmentOnChain } = require('./onchain');
 const {
   generateSkybox,
   generateSkyboxAndWait,
@@ -131,6 +132,7 @@ app.post('/api/generate', async (req, res) => {
     } else {
       // New agent not in default list
       agentEnvironments[agentId] = { prompt, skyboxId: skybox.id, fileUrl: skybox.fileUrl };
+      updateEnvironmentOnChain(agentId, prompt, skybox.id, skybox.fileUrl);
     }
 
     console.log(`[API] Agent "${agentId}" environment updated. Skybox ID: ${skybox.id}`);

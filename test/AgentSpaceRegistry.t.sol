@@ -22,8 +22,6 @@ import {Test, console} from "forge-std/Test.sol";
 import {AgentSpaceRegistry} from "../src/AgentSpaceRegistry.sol";
 
 // ─── Mock ERC-8004 Registry ───────────────────────────────────────────────────
-// Used for local unit tests so we don't need a real RPC.
-// When fork testing, the real registry at 0x8004... is used instead.
 
 contract MockIdentityRegistry {
     uint256 private _nextId = 1;
@@ -49,7 +47,6 @@ contract MockIdentityRegistry {
 }
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
-// Thin wrapper that lets us inject the mock registry.
 
 contract AgentSpaceRegistryHarness is AgentSpaceRegistry {
     constructor(address mockRegistry) AgentSpaceRegistry(mockRegistry) {}
@@ -62,20 +59,17 @@ contract AgentSpaceRegistryTest is Test {
     AgentSpaceRegistryHarness public registry;
     MockIdentityRegistry       public mockERC8004;
 
-    // Test actors
     address public alice      = makeAddr("alice");
     address public bob        = makeAddr("bob");
-    address public controller = makeAddr("controller"); // OpenClaw server wallet
+    address public controller = makeAddr("controller");
     address public attacker   = makeAddr("attacker");
 
-    // Test data
     string constant AGENT_ID      = "agent-001";
     string constant AGENT_URI     = "ipfs://QmTestAgentRegistration";
     string constant INITIAL_PROMPT = "A futuristic floating city above the clouds";
     string constant NEW_PROMPT    = "A bioluminescent deep ocean world";
     string constant SKYBOX_URL    = "https://images-staging.blockadelabs.com/test.jpg";
 
-    // Events to test
     event AgentRegistered(uint256 indexed erc8004TokenId, address indexed owner, string agentId, string agentURI);
     event EnvironmentUpdated(uint256 indexed erc8004TokenId, string agentId, string newPrompt, uint256 skyboxJobId, string skyboxUrl, uint256 timestamp);
     event ControllerUpdated(uint256 indexed erc8004TokenId, address indexed controller);
@@ -125,15 +119,27 @@ contract AgentSpaceRegistryTest is Test {
         uint256 tokenId = _registerAlice();
 
         assertEq(registry.agentIdToToken(AGENT_ID), tokenId);
-        assertEq(registry.addressToToken(alice),     tokenId);
+
+        uint256[] memory tokens = registry.getTokensByOwner(alice);
+        assertEq(tokens.length, 1);
+        assertEq(tokens[0], tokenId);
     }
 
-    function test_RevertWhen_RegisterTwice() public {
-        _registerAlice();
+    function test_SameAddress_CanRegisterMultipleAgents() public {
+        vm.prank(alice);
+        uint256 tokenA = registry.registerAgent("agent-001", AGENT_URI, INITIAL_PROMPT, controller);
 
         vm.prank(alice);
-        vm.expectRevert("AgentSpaceRegistry: already registered");
-        registry.registerAgent("agent-002", AGENT_URI, INITIAL_PROMPT, controller);
+        uint256 tokenB = registry.registerAgent("agent-002", AGENT_URI, "Deep ocean world", controller);
+
+        assertTrue(tokenA != tokenB);
+        assertEq(registry.getAgent(tokenA).agentId, "agent-001");
+        assertEq(registry.getAgent(tokenB).agentId, "agent-002");
+
+        uint256[] memory tokens = registry.getTokensByOwner(alice);
+        assertEq(tokens.length, 2);
+        assertEq(tokens[0], tokenA);
+        assertEq(tokens[1], tokenB);
     }
 
     function test_RevertWhen_DuplicateAgentId() public {
@@ -299,7 +305,6 @@ contract AgentSpaceRegistryTest is Test {
     function test_RevertWhen_ControllerSetsController() public {
         uint256 tokenId = _registerAlice();
 
-        // Controller can update environment but NOT change the controller
         vm.prank(controller);
         vm.expectRevert("AgentSpaceRegistry: only NFT owner can set controller");
         registry.setController(tokenId, attacker);
@@ -362,21 +367,18 @@ contract AgentSpaceRegistryTest is Test {
     function test_VotingWeight_IncreasesWithRegens() public {
         uint256 tokenId = _registerAlice();
 
-        // Do 10 regens
         vm.startPrank(controller);
         for (uint256 i = 0; i < 10; i++) {
             registry.updateEnvironment(tokenId, NEW_PROMPT, i, SKYBOX_URL);
         }
         vm.stopPrank();
 
-        // Should now be 2 (1 base + 1 bonus for 10 regens)
         assertEq(registry.getVotingWeight(tokenId), 2);
     }
 
     function test_VotingWeight_NoPrecisionLoss() public {
         uint256 tokenId = _registerAlice();
 
-        // 9 regens should still be weight 1 (not 1.9 rounded to 1 via truncation)
         vm.startPrank(controller);
         for (uint256 i = 0; i < 9; i++) {
             registry.updateEnvironment(tokenId, NEW_PROMPT, i, SKYBOX_URL);
@@ -415,7 +417,6 @@ contract AgentSpaceRegistryTest is Test {
         }
         vm.stopPrank();
 
-        // Should never revert, just returns 1 + regens/10
         uint256 weight = registry.getVotingWeight(tokenId);
         assertGe(weight, 1);
         assertEq(weight, 1 + (regens / 10));
@@ -445,7 +446,6 @@ contract AgentSpaceRegistryTest is Test {
             tokenIds[i] = registry.registerAgent(id, AGENT_URI, INITIAL_PROMPT, address(0));
         }
 
-        // All token IDs must be unique
         for (uint8 i = 0; i < count; i++) {
             for (uint8 j = i + 1; j < count; j++) {
                 assertTrue(tokenIds[i] != tokenIds[j]);
